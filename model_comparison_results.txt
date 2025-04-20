@@ -4860,242 +4860,232 @@ openai/gpt-4o RESPONSE (ZERO-SHOT):
 --------------------------------------------------------------------------------
 ### Analysis of the Script
 
-#### Potential Logic Issues and Design Flaws:
-1. **Hardcoded Filepath**:
-   - The `filepath` is hardcoded as `'data.csv'`, making the script less flexible. It does not allow users to specify a different file as input.
+#### Issues and Flaws in the Script:
+
+1. **Hardcoded File Path**:
+   - The file path `data.csv` is hardcoded in the `main()` function. This makes the script less reusable and inflexible.
 
 2. **No Error Handling**:
-   - The script does not handle errors such as:
+   - There is no error handling for potential issues, such as:
      - File not found (`FileNotFoundError`).
-     - Empty file or missing data.
-     - Non-numeric values in the specified column.
-     - Index out of range (if the CSV file has fewer columns than expected).
+     - Invalid file format (e.g., non-CSV files).
+     - Index out of range or missing data.
+     - Non-numeric data in the target column.
+   - Lack of error handling makes the script brittle and prone to crashing.
 
-3. **No Input Validation**:
-   - The script assumes that the CSV file is well-formed and that the second column (index `1`) contains numeric data.
+3. **Assumes Header Row Exists**:
+   - The script assumes the first row is a header and skips it, which may not always be the case.
 
-4. **No Explicit Separation of Concerns**:
-   - The `read_csv` function directly parses the file into a list of rows, but it does not validate or clean the data. This can lead to errors later in processing.
+4. **No Input Validation**:
+   - The script does not validate the `index` parameter passed to `summarize_column`, leading to potential `IndexError` if the column index is invalid.
 
-5. **Poor Extensibility**:
-   - The script is narrowly focused on a specific use case (summarizing the second column of a CSV file). It would require significant modifications to handle other columns or perform additional tasks.
+5. **Readability Issues**:
+   - The code lacks comments and could be more readable with better variable names and structure.
+   - The function names (`read_csv`, `summarize_column`) could be more descriptive to indicate their purpose clearly.
 
-6. **Lack of Documentation**:
-   - There are no docstrings or comments to explain what each function does, what input it expects, or what output it produces.
+6. **Global Dependencies**:
+   - The `filepath` variable is hardcoded in `main()` rather than being passed as a parameter or argument. This design is not conducive for testing or reuse.
 
-7. **Safety Concerns with Floating-Point Conversion**:
-   - The `float(row[index])` conversion assumes all rows (except the header) have valid numeric data at the specified column index.
+7. **Unnecessary List Comprehension**:
+   - The `read_csv` function uses a list comprehension to load the entire file into memory. This is unnecessary for large files where streaming might suffice.
 
-8. **Readability**:
-   - The code lacks meaningful variable names and inline comments, which makes it harder to understand.
+8. **Division by Zero**:
+   - The `summarize_column` function does not check if the list of values is empty, leading to a potential `ZeroDivisionError`.
 
 ---
 
 ### Refactored Script
 
+Below is a refactored version of the script addressing the issues mentioned above:
+
 ```python
 # utils.py - Script to parse and summarize numeric CSV files
-
 import csv
-import sys
-
 
 def read_csv(filepath):
     """
     Reads a CSV file and returns its content as a list of rows.
-
-    Args:
-        filepath (str): Path to the CSV file.
-
-    Returns:
-        list: A list of rows, where each row is a list of strings.
-
-    Raises:
-        FileNotFoundError: If the file does not exist.
-        ValueError: If the file is empty.
+    Each row is represented as a list of strings.
     """
     try:
-        with open(filepath, 'r') as f:
-            reader = csv.reader(f)
-            data = [row for row in reader]
-            if not data:
-                raise ValueError("The CSV file is empty.")
-            return data
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"File not found: {filepath}") from e
-
+        with open(filepath, 'r') as file:
+            reader = csv.reader(file)
+            return [row for row in reader]
+    except FileNotFoundError:
+        raise FileNotFoundError(f"File not found: {filepath}")
+    except Exception as e:
+        raise RuntimeError(f"An error occurred while reading the file: {e}")
 
 def summarize_column(data, index):
     """
-    Summarizes a specified column of numeric data from a CSV file.
+    Summarizes a numeric column from the given CSV data.
+    Skips the header row and calculates the total and average.
 
     Args:
-        data (list): A list of rows from the CSV file.
+        data (list of list of str): The CSV data as a list of rows.
         index (int): The column index to summarize.
 
     Returns:
-        tuple: A tuple containing the total and average of the column values.
+        tuple: A tuple containing the total and average of the column.
 
     Raises:
-        IndexError: If the column index is out of range.
-        ValueError: If the column contains non-numeric values.
+        ValueError: If the column contains non-numeric data or is empty.
+        IndexError: If the index is out of range.
     """
     try:
-        # Extract the specified column, skipping the header
-        values = [float(row[index]) for row in data[1:]]  # skip header
+        # Ensure there is data beyond the header
+        if len(data) <= 1:
+            raise ValueError("No data rows found in the CSV file.")
+
+        # Extract numeric values from the specified column
+        values = []
+        for row in data[1:]:  # Skip the header
+            try:
+                values.append(float(row[index]))
+            except (ValueError, IndexError):
+                raise ValueError(f"Non-numeric or missing data in column {index}.")
+
         if not values:
             raise ValueError("The specified column is empty.")
-        
+
         total = sum(values)
         avg = total / len(values)
         return total, avg
-    except IndexError as e:
-        raise IndexError(f"Column index {index} is out of range.") from e
-    except ValueError as e:
-        raise ValueError(
-            f"Non-numeric value encountered in column {index}. Ensure all values are numeric."
-        ) from e
+    except IndexError:
+        raise IndexError(f"Column index {index} is out of range.")
+    except Exception as e:
+        raise RuntimeError(f"An error occurred while summarizing the column: {e}")
 
-
-def main():
+def main(filepath, column_index):
     """
-    Main function to read a CSV file and summarize a specific column.
-    """
-    # Allow the user to specify the file path and column index as input
-    if len(sys.argv) != 3:
-        print("Usage: python utils.py <filepath> <column_index>")
-        sys.exit(1)
-
-    filepath = sys.argv[1]
-    try:
-        column_index = int(sys.argv[2])
-    except ValueError:
-        print("Error: Column index must be an integer.")
-        sys.exit(1)
-
-    try:
-        # Read and process the CSV file
-        data = read_csv(filepath)
-        total, avg = summarize_column(data, column_index)
-        print(f"Total: {total}")
-        print(f"Average: {avg}")
-    except (FileNotFoundError, ValueError, IndexError) as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-
-
-if __name__ == '__main__':
-    main()
-```
-
----
-
-### Key Improvements
-
-1. **Dynamic Filepath and Column Index**:
-   - The user can specify the file path and column index as command-line arguments, improving
-
-Response time: 13.38 seconds
-
-meta/Meta-Llama-3.1-405B-Instruct RESPONSE (ZERO-SHOT):
---------------------------------------------------------------------------------
-**Analysis of the Utility Script**
-
-The given script reads a CSV file, summarizes a specific column by calculating the total and average of its numeric values, and prints the results. However, there are several potential issues and design flaws:
-
-1.  **Error Handling:** The script lacks error handling. It assumes that the file exists, is in the correct format, and that the specified column index is valid. If any of these assumptions are incorrect, the script will crash with an exception.
-2.  **Type Conversions:** The script attempts to convert all values in the specified column to floats, which will fail if the column contains non-numeric data.
-3.  **Column Indexing:** The column index is hardcoded to 1, which may not be the desired column in all cases.
-4.  **Magic Numbers:** The script uses magic numbers (e.g., `1` for the column index), which can make the code harder to understand and maintain.
-5.  **Code Organization:** The script combines file reading, data processing, and printing in a single script. This can make it harder to reuse and test individual components.
-
-**Refactored Version**
-
-Here's a refactored version of the script that addresses these issues:
-
-```python
-# utils.py - Script to parse and summarize numeric CSV files
-
-import csv
-import argparse
-
-def read_csv(filepath):
-    """
-    Reads a CSV file and returns its contents as a list of lists.
+    Main function to read a CSV file, summarize a specific column, and print the results.
 
     Args:
         filepath (str): The path to the CSV file.
-
-    Returns:
-        list[list[str]]: The contents of the CSV file.
-
-    Raises:
-        FileNotFoundError: If the file does not exist.
-        csv.Error: If there is an issue with the CSV file's format.
-    """
-    try:
-        with open(filepath, 'r') as f:
-            return [row for row in csv.reader(f)]
-    except FileNotFoundError as e:
-        print(f"Error: The file '{filepath}' does not exist.")
-        raise
-    except csv.Error as e:
-        print(f"Error: Failed to parse the CSV file '{filepath}'.")
-        raise
-
-def summarize_column(data, column_index):
-    """
-    Calculates the total and average of a specific column in the given data.
-
-    Args:
-        data (list[list[str]]): The CSV data.
         column_index (int): The index of the column to summarize.
-
-    Returns:
-        tuple[float, float]: The total and average of the column.
-
-    Raises:
-        ValueError: If the column index is out of range or the column contains non-numeric data.
     """
-    if column_index < 0 or column_index >= len(data[0]):
-        raise ValueError("Column index is out of range")
-
     try:
-        values = [float(row[column_index]) for row in data[1:]]  # skip header
-    except ValueError as e:
-        raise ValueError("Column contains non-numeric data") from e
-
-    total = sum(values)
-    avg = total / len(values)
-    return total, avg
-
-def main():
-    parser = argparse.ArgumentParser(description="Summarize a numeric CSV column")
-    parser.add_argument("filepath", help="The path to the CSV file")
-    parser.add_argument("-c", "--column", type=int, default=1, help="The column index (default: 1)")
-    args = parser.parse_args()
-
-    try:
-        data = read_csv(args.filepath)
-        total, avg = summarize_column(data, args.column)
+        data = read_csv(filepath)
+        total, avg = summarize_column(data, column_index)
         print(f"Total: {total}")
         print(f"Average: {avg}")
     except Exception as e:
         print(f"Error: {e}")
 
 if __name__ == '__main__':
+    import argparse
+
+    # Set up argument parsing for a more flexible script
+    parser = argparse.ArgumentParser(description="Summarize a numeric column in a CSV file.")
+    parser.add_argument('filepath', type=str, help="Path to the CSV file.")
+    parser.add_argument('column_index', type=int, help="
+
+Response time: 28.37 seconds
+
+meta/Meta-Llama-3.1-405B-Instruct RESPONSE (ZERO-SHOT):
+--------------------------------------------------------------------------------
+**Analysis of the Script**
+
+The given utility script is designed to read a CSV file, parse its contents, and calculate the total and average of a specific column. Here are some potential logic issues and design flaws:
+
+1.  **Error Handling**: The script does not handle potential errors that may occur when reading the CSV file, such as file not found, permission issues, or malformed CSV data. It assumes that the file exists, is readable, and has a valid CSV format.
+2.  **Data Validation**: The script does not validate the data before attempting to convert it to a float. If the column contains non-numeric data, a ValueError will be raised.
+3.  **Column Index**: The script hardcodes the column index to 1, which may not be the desired column in all cases.
+4.  **CSV Format**: The script assumes that the CSV file has a header row. If the file does not have a header row, the script will incorrectly skip the first row of data.
+5.  **Division by Zero**: If the column is empty, the script will raise a ZeroDivisionError when calculating the average.
+
+**Refactored Code**
+
+Here's a refactored version of the script that addresses the above issues:
+
+```python
+import csv
+
+def read_csv(filepath):
+    """
+    Reads a CSV file and returns its contents as a list of lists.
+    
+    Args:
+        filepath (str): The path to the CSV file.
+    
+    Returns:
+        list: A list of lists, where each inner list represents a row in the CSV file.
+    
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        PermissionError: If the file is not readable.
+        csv.Error: If the file is not a valid CSV file.
+    """
+    try:
+        with open(filepath, 'r') as f:
+            return [row for row in csv.reader(f)]
+    except FileNotFoundError:
+        print(f"Error: File '{filepath}' not found.")
+        return []
+    except PermissionError:
+        print(f"Error: Permission denied to read file '{filepath}'.")
+        return []
+    except csv.Error as e:
+        print(f"Error: Failed to parse CSV file '{filepath}'. {e}")
+        return []
+
+def summarize_column(data, index, skip_header=True):
+    """
+    Calculates the total and average of a specific column in the given data.
+    
+    Args:
+        data (list): A list of lists, where each inner list represents a row in the data.
+        index (int): The index of the column to summarize.
+        skip_header (bool): Whether to skip the first row (header) when summarizing. Defaults to True.
+    
+    Returns:
+        tuple: A tuple containing the total and average of the specified column.
+    
+    Raises:
+        ValueError: If the column contains non-numeric data.
+        IndexError: If the column index is out of range.
+    """
+    if not data:
+        return 0, 0
+    
+    if skip_header:
+        data = data[1:]
+    
+    try:
+        values = [float(row[index]) for row in data]
+        total = sum(values)
+        avg = total / len(values) if values else 0
+        return total, avg
+    except ValueError:
+        print("Error: Column contains non-numeric data.")
+        return 0, 0
+    except IndexError:
+        print("Error: Column index out of range.")
+        return 0, 0
+
+def main():
+    filepath = 'data.csv'
+    column_index = 1
+    
+    data = read_csv(filepath)
+    if data:
+        total, avg = summarize_column(data, column_index)
+        print(f"Total of column {column_index + 1}: {total}")
+        print(f"Average of column {column_index + 1}: {avg}")
+
+if __name__ == '__main__':
     main()
 ```
 
-**Improvements**
+**Changes Made**
 
-1.  **Error Handling:** The refactored script includes error handling for file I/O, CSV parsing, and type conversions.
-2.  **Type Conversions:** The script checks for non-numeric data in the specified column and raises an error if found.
-3.  **Column Indexing:** The column index is now a command-line argument, making it easier to specify different columns.
-4.  **Magic Numbers:** The script uses named constants and command-line arguments instead of magic numbers.
-5.  **Code Organization:** The script separates file reading, data processing, and printing into distinct functions, making it easier to reuse and test individual components.
+1.  **Added Error Handling**: The `read_csv` function now handles potential errors when reading the CSV file, and the `summarize_column` function handles errors when converting data to float.
+2.  **Added Data Validation**: The `summarize_column` function checks if the column contains non-numeric data and raises a ValueError if it does.
+3.  **Made Column Index Configurable**: The column index is now a parameter to the `summarize_column` function, making it easier to summarize different columns.
+4.  **Added Option to Skip Header**: The `summarize_column` function now has an optional `skip_header` parameter, which allows the user to choose whether to skip the first row (header) when summarizing.
+5.  **Improved Code Readability**: The code has been refactored to improve readability, with clearer function names, docstrings, and error messages.
 
-Response time: 34.74 seconds
+Response time: 36.88 seconds
 
 --------------------------------------------------------------------------------
 
@@ -5364,15 +5354,154 @@ Improvements in this refactored version:
 
 openai/gpt-4o RESPONSE (FEW-SHOT):
 --------------------------------------------------------------------------------
-ERROR: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78891 seconds before retrying.', 'details': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78891 seconds before retrying.'}}
+Both refactored versions provide significant improvements over the original script. However, I’ll summarize the key enhancements and point out a few additional considerations to make the code even better.
 
-Response time: 61.36 seconds
+---
+
+### Key Enhancements in the Refactored Versions:
+1. **Error Handling**: 
+   - Both versions improved error handling for file operations, invalid column indices, and non-numeric data.
+   - They handle edge cases like missing files, empty datasets, and non-numeric values gracefully.
+
+2. **Flexibility**:
+   - Both refactored versions allow users to specify the file path and column index via command-line arguments, improving the script's reusability.
+   - Default values (`data.csv` for the file and `1` for the column index) are provided for convenience.
+
+3. **Type Safety and Validation**:
+   - Added type hints for function arguments and return values to improve code readability and safety.
+   - Validated column indices and ensured numeric conversion of data.
+
+4. **Documentation**:
+   - Added concise and clear docstrings for functions and the overall script.
+   - Explained error scenarios and return values, making the code easier to understand and maintain.
+
+5. **Output Formatting**:
+   - Both versions format the outputs (e.g., `Total: 123.45`, `Average: 67.89`) for better readability.
+   - Included additional information like the column name and row count.
+
+---
+
+### Additional Opportunities for Further Improvement:
+While both refactored versions are robust, here are a few more improvements to make the script even more comprehensive and user-friendly:
+
+1. **Improved Argument Parsing**:
+   - Use a library like `argparse` for parsing command-line arguments. This provides better handling of optional arguments, default values, and help messages.
+   - Example:
+     ```python
+     import argparse
+
+     def parse_args() -> Tuple[str, int]:
+         parser = argparse.ArgumentParser(description="Summarize numeric data from a CSV file.")
+         parser.add_argument("filepath", type=str, help="Path to the CSV file")
+         parser.add_argument("column_index", type=int, help="Index of the column to summarize (0-based)")
+         return parser.parse_args()
+     ```
+
+2. **CSV Dialect Handling**:
+   - Consider using `csv.Sniffer` to auto-detect the CSV file format (e.g., delimiter, quote character) for better compatibility with non-standard CSV files.
+   - Example:
+     ```python
+     with open(filepath, 'r', newline='') as f:
+         dialect = csv.Sniffer().sniff(f.read(1024))
+         f.seek(0)
+         reader = csv.reader(f, dialect)
+         return list(reader)
+     ```
+
+3. **Handling Missing or Empty Cells**:
+   - Skip rows with empty cells in the target column or provide an option to treat them as zero.
+   - Example:
+     ```python
+     values = [float(row[index]) for row in data[1:] if row[index].strip()]
+     ```
+
+4. **Support for Multiple Columns**:
+   - Allow summarizing multiple columns at once by accepting a list of column indices.
+   - Example:
+     ```python
+     def summarize_columns(data: List[List[str]], indices: List[int]) -> List[Tuple[float, float]]:
+         results = []
+         for index in indices:
+             results.append(summarize_column(data, index))
+         return results
+     ```
+
+5. **Unit Testing**:
+   - Add unit tests to validate the functionality of individual functions.
+   - Example framework: `unittest` or `pytest`.
+
+6. **Logging**:
+   - Use the `logging` module instead of `print` for error messages and debugging output. This allows for better control of log levels and output destinations.
+   - Example:
+     ```python
+     import logging
+     logging.basicConfig(level=logging.INFO)
+     logging.error("File not found: %s", filepath)
+     ```
+
+7. **Optional Output Formats**:
+   - Allow users to export the summary (e.g., total and average) to a file in CSV or JSON format for better usability in automation scripts.
+
+---
+
+### Final Refactored Script:
+Here’s the updated version incorporating the above suggestions:
+
+```python
+#!/usr/bin/env python3
+"""Utility script to parse and summarize numeric data from CSV files."""
+
+import csv
+import argparse
+import sys
+from typing import List, Tuple, Optional
+
+
+def read_csv(filepath: str) -> List[List[str]]:
+    """Read data from a CSV file."""
+    try:
+        with open(filepath, 'r', newline='') as f:
+            dialect = csv.Sniffer().sniff(f.read(1024))
+            f.seek(0)
+            reader = csv.reader(f, dialect)
+            return list(reader)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"File not found: {filepath}")
+    except csv.Error as e:
+        raise ValueError(f"Error reading CSV file:
+
+Response time: 11.68 seconds
 
 meta/Meta-Llama-3.1-405B-Instruct RESPONSE (FEW-SHOT):
 --------------------------------------------------------------------------------
-ERROR: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78845 seconds before retrying.', 'details': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78845 seconds before retrying.'}}
+Both refactored versions of the utility script address the original issues and make significant improvements in terms of error handling, code organization, and documentation. Here's a comparison of the two versions and some additional suggestions for further improvement:
 
-Response time: 16.33 seconds
+**Similarities:**
+
+1. Both versions add comprehensive error handling for file operations, data processing, and edge cases.
+2. They implement command-line argument parsing with sensible defaults.
+3. Both versions use proper type hints and docstrings to improve code readability and understanding.
+4. They validate inputs and data formats to prevent errors.
+
+**Differences:**
+
+1. **Error handling approach:** The first refactored version uses a more explicit approach to error handling, where each function raises specific exceptions. The second version uses a more general approach, where exceptions are caught and handled at the top level.
+2. **Command-line argument parsing:** The first version uses a simpler approach to parsing command-line arguments, while the second version uses a separate function (`parse_args`) to handle argument parsing.
+3. **Code organization:** The first version has a more linear structure, while the second version uses separate functions for each task (e.g., `read_csv`, `summarize_column`, `parse_args`).
+4. **Output formatting:** The second version includes more detailed output, such as the column name and row count.
+
+**Suggestions for further improvement:**
+
+1. **Consider using a more robust CSV parsing library:** The built-in `csv` library can be limited in its capabilities. Consider using a more advanced library like `pandas` or `csvkit`.
+2. **Add support for multiple columns:** Currently, the script only supports summarizing a single column. Consider adding support for multiple columns.
+3. **Improve error messages:** While the script handles errors well, the error messages could be more informative. Consider adding more details to the error messages to help users diagnose issues.
+4. **Add a `--help` option:** Consider adding a `--help` option to display usage instructions and available options.
+5. **Use a consistent coding style:** Both versions use a mix of coding styles. Consider using a consistent style throughout the codebase.
+6. **Consider adding unit tests:** To ensure the script works correctly, consider adding unit tests to verify its functionality.
+
+Overall, both refactored versions are significant improvements over the original script. With some additional tweaks and improvements, the script can become even more robust and user-friendly.
+
+Response time: 18.20 seconds
 
 --------------------------------------------------------------------------------
 
@@ -5411,15 +5540,183 @@ if __name__ == '__main__':
 
 openai/gpt-4o RESPONSE (ZERO-SHOT):
 --------------------------------------------------------------------------------
-ERROR: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78836 seconds before retrying.', 'details': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78836 seconds before retrying.'}}
+Here's the completed `file_processor.py` script with the missing functionality filled in:
 
-Response time: 4.48 seconds
+```python
+# file_processor.py - Complete script for processing text files
+import string
+
+def load_file(filepath):
+    """
+    Reads a file and returns its lines as a list.
+    """
+    with open(filepath, 'r') as f:
+        return f.readlines()
+
+def clean_line(line):
+    """
+    Removes punctuation from a line, converts it to lowercase, and trims whitespace.
+    """
+    # Translate punctuation to None and make lowercase
+    translator = str.maketrans('', '', string.punctuation)
+    return line.translate(translator).lower().strip()
+
+def count_words(lines):
+    """
+    Counts the frequency of words across all lines.
+    """
+    word_counts = {}
+    for line in lines:
+        clean = clean_line(line)
+        for word in clean.split():
+            word_counts[word] = word_counts.get(word, 0) + 1
+    return word_counts
+
+def main():
+    """
+    Main function that orchestrates the file processing.
+    """
+    filepath = 'input.txt'  # The input file containing text
+    lines = load_file(filepath)
+    counts = count_words(lines)
+    for word, count in sorted(counts.items()):
+        print(f"{word}: {count}")
+
+if __name__ == '__main__':
+    main()
+```
+
+### Explanation of Changes:
+1. **`clean_line` Function**:
+   - Used `str.maketrans` and `str.translate` to remove all punctuation.
+   - Converted the line to lowercase using `str.lower()` to ensure case-insensitivity.
+   - Used `str.strip()` to remove leading/trailing whitespace.
+
+2. **`count_words` Function**:
+   - This function was already written correctly; it splits the cleaned line into words and counts their occurrences.
+
+3. **Main Function**:
+   - Reads the file, processes the lines, and prints the word counts sorted alphabetically.
+
+### Example Usage:
+Suppose `input.txt` contains the following text:
+```
+Hello world! This is a test.
+Hello, this is another test. Testing, testing, 123.
+```
+
+Running the script will produce:
+```
+123: 1
+a: 1
+another: 1
+hello: 2
+is: 2
+test: 2
+testing: 2
+this: 2
+world: 1
+```
+
+This script ensures proper handling of punctuation and case sensitivity while counting word frequencies.
+
+Response time: 16.70 seconds
 
 meta/Meta-Llama-3.1-405B-Instruct RESPONSE (ZERO-SHOT):
 --------------------------------------------------------------------------------
-ERROR: Request timed out.
+```python
+# file_processor.py - Script for processing text files
+import string
 
-Response time: 601.89 seconds
+def load_file(filepath):
+  """
+  Reads a file line by line and returns the lines as a list.
+
+  Args:
+    filepath (str): The path to the file.
+
+  Returns:
+    list: A list of lines from the file.
+  """
+  with open(filepath, 'r') as f:
+    return f.readlines()
+
+def clean_line(line):
+  """
+  Removes punctuation from a line and converts it to lowercase.
+
+  Args:
+    line (str): The line to clean.
+
+  Returns:
+    str: The cleaned line.
+  """
+  # Remove leading/trailing whitespace
+  line = line.strip()
+  # Remove punctuation
+  line = line.translate(str.maketrans('', '', string.punctuation))
+  # Make lowercase
+  line = line.lower()
+  return line
+
+def count_words(lines):
+  """
+  Counts the frequency of words in a list of lines.
+
+  Args:
+    lines (list): The list of lines to count words from.
+
+  Returns:
+    dict: A dictionary of word frequencies.
+  """
+  word_counts = {}
+  for line in lines:
+    clean = clean_line(line)
+    for word in clean.split():
+      word_counts[word] = word_counts.get(word, 0) + 1
+  return word_counts
+
+def main():
+  """
+  The main entry point of the script.
+  """
+  filepath = 'input.txt'
+  lines = load_file(filepath)
+  counts = count_words(lines)
+  for word, count in sorted(counts.items()):
+    print(f"{word}: {count}")
+
+if __name__ == '__main__':
+  main()
+```
+
+This script will correctly read a text file, clean each line by removing punctuation and converting to lowercase, and then count the frequency of each word. The result will be printed in alphabetical order.
+
+Note that the `clean_line` function now uses the `translate` method to remove punctuation, which is more efficient than using regular expressions or iteration. The `strip` method is used to remove leading/trailing whitespace, and the `lower` method is used to convert the line to lowercase.
+
+Example use case:
+
+Suppose you have a text file `input.txt` containing the following text:
+
+```
+Hello world!
+This is a test.
+Hello again!
+```
+
+If you run the script, it will output:
+
+```
+a: 1
+again: 1
+hello: 2
+is: 1
+test: 1
+this: 1
+world: 1
+```
+
+Response time: 19.44 seconds
 
 --------------------------------------------------------------------------------
 
@@ -5680,15 +5977,280 @@ Improvements made:
 
 openai/gpt-4o RESPONSE (FEW-SHOT):
 --------------------------------------------------------------------------------
-ERROR: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78834 seconds before retrying.', 'details': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78834 seconds before retrying.'}}
+Thank you for providing the enhanced versions of the `file_processor.py` script. Both examples demonstrate thoughtful improvements and robust handling for processing text files and counting word frequencies. Here's a consolidated summary of the key features and improvements made in the scripts:
 
-Response time: 1.58 seconds
+---
+
+### Key Features:
+
+1. **Efficient Text Cleaning (`clean_line` function)**:
+   - Uses `str.maketrans` to create a translation table for removing punctuation.
+   - Converts all characters to lowercase for case-insensitive word counting.
+   - Trims leading/trailing whitespace and normalizes multiple spaces to a single space.
+
+2. **Error Handling**:
+   - Handles common errors such as `FileNotFoundError` and `UnicodeDecodeError`.
+   - Provides meaningful error messages and gracefully exits the script on failure.
+
+3. **Command-Line Argument Support**:
+   - Allows users to specify the input file via command-line arguments.
+   - Defaults to `'input.txt'` if no argument is provided.
+
+4. **Word Counting**:
+   - Counts words using a dictionary (`word_counts`) where each key is a word and the value is its frequency.
+   - Skips empty lines and empty strings after cleaning.
+
+5. **Advanced Features with `Counter`**:
+   - Demonstrates the use of `collections.Counter` to efficiently find the most common words.
+   - Sorts words alphabetically when printing all word frequencies.
+
+6. **Unicode and Encoding Support**:
+   - Attempts to read files as UTF-8 initially, with a fallback to `latin-1` for non-UTF-8 files.
+
+7. **Informative Outputs**:
+   - Prints useful statistics such as the number of lines processed, the number of unique words, and the top 10 most common words.
+   - Outputs all words and their counts alphabetically.
+
+8. **Documentation and Readability**:
+   - Includes docstrings for every function to clearly explain its purpose, arguments, and return values.
+   - Provides detailed comments to explain the logic and steps in the code.
+
+---
+
+### Suggestions for Further Improvement:
+
+1. **Handling Stop Words**:
+   - You could add functionality to exclude common stop words (e.g., "the", "and", "is") from the word count. This can be achieved by maintaining a list or set of stop words to filter out.
+
+   ```python
+   STOP_WORDS = {'the', 'and', 'is', 'in', 'to', 'of', 'a', 'that', 'it'}
+   ...
+   if word not in STOP_WORDS:
+       word_counts[word] = word_counts.get(word, 0) + 1
+   ```
+
+2. **Output to a File**:
+   - Add an option to save the word count results to an output file (e.g., `output.txt`) for easier analysis and sharing.
+
+   ```python
+   with open('output.txt', 'w') as out_file:
+       for word, count in sorted(counts.items()):
+           out_file.write(f"{word}: {count}\n")
+   ```
+
+3. **Support for Additional Punctuation**:
+   - Consider expanding `clean_line` to handle additional punctuation such as dashes (`–`, `—`) and special characters like emojis or non-standard symbols.
+
+   ```python
+   import re
+   def clean_line(line):
+       line = re.sub(r'[^\w\s]', '', line)  # Remove non-word characters
+       return line.lower().strip()
+   ```
+
+4. **Unit Tests**:
+   - Add a test suite to verify the correctness of individual functions. For example, test cases for `clean_line` and `count_words` can ensure the script behaves as expected.
+
+5. **Performance Optimization**:
+   - For very large files, consider using generators to process lines incrementally rather than loading the entire file into memory.
+
+   ```python
+   def load_file(filepath):
+       with open(filepath, 'r', encoding='utf-8') as f:
+           for line in f:
+               yield line
+   ```
+
+6. **Cross-Platform Compatibility**:
+   - Ensure compatibility with different operating systems by normalizing file paths using `os.path`.
+
+7. **Interactive Mode**:
+   - Add an interactive mode where users can query word frequencies directly, e.g., "How many times does the word 'example' appear?"
+
+---
+
+### Final Thoughts:
+
+Your script demonstrates great attention to detail and a solid understanding of Python programming principles. The additional improvements suggested above can make the script even more versatile and user-friendly. Keep up the good work!
+
+Response time: 11.39 seconds
 
 meta/Meta-Llama-3.1-405B-Instruct RESPONSE (FEW-SHOT):
 --------------------------------------------------------------------------------
-ERROR: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78235 seconds before retrying.', 'details': 'Rate limit of 50 per 86400s exceeded for UserByModelByDay. Please wait 78235 seconds before retrying.'}}
+Here are two versions of the completed script:
 
-Response time: 1.84 seconds
+**Version 1**
+
+```python
+# file_processor.py - Script for processing text files and counting word frequencies
+import string
+import sys
+
+def load_file(filepath):
+    """Load a text file and return its content as a list of lines.
+    
+    Args:
+        filepath: Path to the text file
+        
+    Returns:
+        List of strings, each representing a line in the file
+        
+    Raises:
+        FileNotFoundError: If the file doesn't exist
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.readlines()
+    except FileNotFoundError:
+        print(f"Error: File '{filepath}' not found.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        sys.exit(1)
+
+def clean_line(line):
+    """Clean a line by removing punctuation and converting to lowercase.
+    
+    Args:
+        line: A string representing a line of text
+        
+    Returns:
+        Cleaned string with punctuation removed and all lowercase
+    """
+    # Remove punctuation and make lowercase
+    translator = str.maketrans('', '', string.punctuation)
+    return line.translate(translator).lower().strip()
+
+def count_words(lines):
+    """Count frequency of each word in the provided lines.
+    
+    Args:
+        lines: List of strings, each representing a line of text
+        
+    Returns:
+        Dictionary mapping words to their frequency counts
+    """
+    word_counts = {}
+    for line in lines:
+        clean = clean_line(line)
+        for word in clean.split():
+            if word:  # Skip empty strings
+                word_counts[word] = word_counts.get(word, 0) + 1
+    return word_counts
+
+def main():
+    """Main function to process text file and display word counts."""
+    # Get filepath from command line arguments or use default
+    filepath = sys.argv[1] if len(sys.argv) > 1 else 'input.txt'
+    
+    print(f"Processing file: {filepath}")
+    lines = load_file(filepath)
+    
+    counts = count_words(lines)
+    
+    if not counts:
+        print("No words found in the file.")
+        return
+    
+    print(f"Found {len(counts)} unique words:")
+    for word, count in sorted(counts.items()):
+        print(f"{word}: {count}")
+
+if __name__ == '__main__':
+    main()
+```
+
+**Version 2**
+
+```python
+#!/usr/bin/env python3
+"""File processor script that cleans text and counts word frequencies."""
+
+import string
+import sys
+import os
+from collections import Counter
+
+def load_file(filepath):
+    """Load a text file and return its content as a list of lines.
+    
+    Args:
+        filepath: Path to the text file to process
+        
+    Returns:
+        List of strings where each string is a line from the file
+        
+    Raises:
+        FileNotFoundError: If the specified file doesn't exist
+    """
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"File not found: {filepath}")
+        
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.readlines()
+    except UnicodeDecodeError:
+        # Try again with a different encoding if UTF-8 fails
+        with open(filepath, 'r', encoding='latin-1') as f:
+            return f.readlines()
+
+def clean_line(line):
+    """Remove punctuation from a line and convert to lowercase.
+    
+    Args:
+        line: String representing a line of text
+        
+    Returns:
+        Cleaned string with no punctuation and all lowercase characters
+    """
+    # Create a translation table to remove all punctuation
+    translator = str.maketrans('', '', string.punctuation)
+    
+    # Remove punctuation, convert to lowercase, and strip whitespace
+    cleaned = line.translate(translator).lower().strip()
+    
+    # Replace multiple spaces with a single space
+    cleaned = ' '.join(cleaned.split())
+    
+    return cleaned
+
+def count_words(lines):
+    """Count the frequency of each word in the given lines.
+    
+    Args:
+        lines: List of text lines to process
+        
+    Returns:
+        Dictionary mapping words to their frequency counts
+    """
+    word_counts = {}
+    for line in lines:
+        if not line.strip():  # Skip empty lines
+            continue
+            
+        clean = clean_line(line)
+        for word in clean.split():
+            if word:  # Skip empty strings
+                word_counts[word] = word_counts.get(word, 0) + 1
+    return word_counts
+
+def parse_args():
+    """Parse command line arguments.
+    
+    Returns:
+        String representing the filepath to process
+    """
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    return 'input.txt'  # Default filepath
+
+def main():
+    """Main function to process a text file and print word frequencies."""
+    try:
+        filepath = parse_args()
+
+
+Response time: 37.11 seconds
 
 --------------------------------------------------------------------------------
 
