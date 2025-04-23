@@ -14,6 +14,10 @@ respond to identical prompts, you can analyze their strengths, weaknesses, and u
 gaining valuable insights into how prompt engineering affects model performance and how different 
 architectures handle the same tasks.
 
+NOTE: There are two project reports, one containing just analysis of the prompts (<10 pages). The other
+is a longer version which has all unfiltered model responses (removing extra enters) which is much longer
+but the formatting keeps it easy to read
+
 ## 2. Getting Started
 
 ### Prerequisites
